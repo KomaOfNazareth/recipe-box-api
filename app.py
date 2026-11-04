@@ -50,7 +50,11 @@ def recipe_to_dict(row):
         "is_public": bool(row["is_public"]),
     }
 
+################
+# API endpoints
+################
 
+# GET endpoints
 @app.get("/")
 def hello():
     return jsonify({"message": "Recipe Box API", "recipes": "/recipes"})
@@ -72,6 +76,9 @@ def get_recipe(recipe_id):
     return jsonify(recipe_to_dict(row))
 
 
+# POST endpoints
+
+# User registration endpoint
 @app.post("/register")
 def register_user():
     data = request.get_json()
@@ -122,6 +129,7 @@ def register_user():
         "email": email
     }), 201
 
+# Login endpoint
 @app.post("/login")
 def user_login():
     data = request.get_json(silent=True)
@@ -158,6 +166,9 @@ def user_login():
     except sqlite3.Error as e:
         return jsonify({"error": "database error"}), 500
 
+# Recipe CRUD endpoints
+
+# Create recipe
 @app.post("/recipes")
 def create_recipe():
     data = request.get_json(silent=True)
@@ -185,7 +196,7 @@ def create_recipe():
     ).fetchone()
     return jsonify(recipe_to_dict(row)), 201
 
-
+# Update recipe
 @app.patch("/recipes/<int:recipe_id>")
 def update_recipe(recipe_id):
     data = request.get_json(silent=True)
@@ -217,7 +228,7 @@ def update_recipe(recipe_id):
     ).fetchone()
     return jsonify(recipe_to_dict(row))
 
-
+# Delete recipe
 @app.delete("/recipes/<int:recipe_id>")
 def delete_recipe(recipe_id):
     db = get_db()
