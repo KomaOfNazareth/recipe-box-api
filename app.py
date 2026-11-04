@@ -69,6 +69,56 @@ def get_recipe(recipe_id):
     return jsonify(recipe_to_dict(row))
 
 
+@app.post("/register")
+def register_user():
+    data = request.get_json()
+    
+    if not data:
+        return jsonify({"error": "Invalid input"}), 400
+    
+    username = data.get("username")
+    email = data.get("email")
+    password = data.get("password")
+    
+    if (
+        not isinstance (username, str) or not username.strip()
+        or not isinstance(email, str) or not email.strip()
+        or not isinstance(password, str) or not password.strip()
+    ):
+        return jsonify({"error": "Invalid input"}), 400
+    
+    # Hash the password
+    password_hash = hash_password(password)
+    
+    # Insert it into the database using parameters
+    db = get_db()
+    cursor = db.cursor()
+    
+    try:
+        cursor.execute(
+            """
+        INSERT INTO users (username, email, password_hash)
+            VALUES (?, ?, ?)
+            """,
+            (username, email, password_hash)
+        )
+        db.commit()
+    
+    except sqlite3.IntegrityError as e:
+        if "UNIQUE constraint failed: users.username" in str(e):
+            return jsonify({"error": "username already exists"}), 409
+        elif "UNIQUE constraint failed: users.email" in str(e):
+            return jsonify({"error": "email already exists"}), 409
+        else:
+            return jsonify({"error": "database error"}), 500
+    
+    # Respond with 201 and safe fields only
+    return jsonify({
+        "id": cursor.lastrowid,
+        "username": username,
+        "email": email
+    }), 201
+
 @app.post("/recipes")
 def create_recipe():
     data = request.get_json(silent=True)
