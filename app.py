@@ -15,6 +15,7 @@ DATABASE = "recipes.db"
 
 app = Flask(__name__)
 
+# Password hashing and verification functions
 def hash_password(plain_password: str) -> str:
     """Take a plain-text password and return a hashed version of it."""
     return generate_password_hash(plain_password)
@@ -23,13 +24,14 @@ def verify_password(stored_hash: str, candidate_password: str) -> bool:
     """Return True if the candidate password matches the stored hash."""
     return check_password_hash(stored_hash, candidate_password)
 
+
+# Database connection and teardown
 def get_db():
     if "db" not in g:
         g.db = sqlite3.connect(DATABASE)
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
     return g.db
-
 
 @app.teardown_appcontext
 def close_db(exception):
@@ -38,6 +40,7 @@ def close_db(exception):
         db.close()
 
 
+# Helper function to convert a recipe row to a dictionary
 def recipe_to_dict(row):
     return {
         "id": row["id"],
@@ -119,10 +122,48 @@ def register_user():
         "email": email
     }), 201
 
+@app.post("/login")
+def user_login():
+    data = request.get_json(silent=True)
+    
+    if data is None:
+        return jsonify({"error": "Invalid JSON"}), 400
+    
+    if not data.get("username") or not data.get("password"):
+        return jsonify({"error": "Missing username or password"}), 400
+    
+    username = data.get("username")
+    password = data.get("password")
+    
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(
+            "SELECT id, username, email, password_hash FROM users WHERE username = ?", (username,)
+        )
+        user = cursor.fetchone()
+        if user is None:
+            return jsonify({"error": "Invalid username or password"}), 401
+        
+        if not verify_password(user["password_hash"], password):
+            return jsonify({"error": "Invalid username or password"}), 401
+        
+        # Successful login
+        return jsonify({
+            "id": user["id"],
+            "username": user["username"],
+            "email": user["email"]
+        }), 200
+        
+    except sqlite3.Error as e:
+        return jsonify({"error": "database error"}), 500
+
 @app.post("/recipes")
 def create_recipe():
     data = request.get_json(silent=True)
-    if not data or not data.get("title") or not data.get("ingredients"):
+    if data is None:
+        return jsonify({"error": "Invalid JSON"}), 400
+    if not data.get("title") or not data.get("ingredients"):
         return jsonify({"error": "title and ingredients are required"}), 400
     db = get_db()
     try:
