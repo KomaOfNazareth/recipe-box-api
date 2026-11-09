@@ -6,12 +6,17 @@ That is the point: you will add both, lesson by lesson, in Units 2 and 3.
 """
 
 import sqlite3
+import os
+import jwt
 
 from flask import Flask, g, jsonify, request
 
 from werkzeug.security import generate_password_hash, check_password_hash
 
+from datetime import datetime, timedelta
+
 DATABASE = "recipes.db"
+JWT_SECRET = os.getenv("JWT_SECRET")
 
 app = Flask(__name__)
 
@@ -156,12 +161,14 @@ def user_login():
         if not verify_password(user["password_hash"], password):
             return jsonify({"error": "Invalid username or password"}), 401
         
-        # Successful login
-        return jsonify({
-            "id": user["id"],
-            "username": user["username"],
-            "email": user["email"]
-        }), 200
+        # Successful login - issue JWT
+        payload = {
+            "sub": str(user["id"]),
+            "exp": datetime.utcnow() + timedelta(hours=1)  # Token expires in 1 hour
+        }
+        token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+        
+        return jsonify({"token": token}), 200
         
     except sqlite3.Error as e:
         return jsonify({"error": "database error"}), 500
