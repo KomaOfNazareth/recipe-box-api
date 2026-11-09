@@ -13,7 +13,7 @@ from flask import Flask, g, jsonify, request
 
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 DATABASE = "recipes.db"
 JWT_SECRET = os.getenv("JWT_SECRET")
@@ -164,7 +164,7 @@ def user_login():
         # Successful login - issue JWT
         payload = {
             "sub": str(user["id"]),
-            "exp": datetime.utcnow() + timedelta(hours=1)  # Token expires in 1 hour
+            "exp": datetime.now(timezone.utc) + timedelta(seconds=20)  # Token expires in 20 seconds
         }
         token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
         
@@ -191,6 +191,10 @@ def create_recipe():
     JWT_SECRET = os.getenv("JWT_SECRET")
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        
+    except jwt.ExpiredSignatureError:
+        return jsonify({"error": "Token has expired, please log in again"}), 401
+    
     except jwt.InvalidTokenError:
         return jsonify({"error": "Invalid or expired token"}), 401
     
