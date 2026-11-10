@@ -8,26 +8,54 @@ That is the point: you will add both, lesson by lesson, in Units 2 and 3.
 import sqlite3
 import os
 import jwt
+import hashlib
+import hmac
+import base64
 
 from flask import Flask, g, jsonify, request
-
-from werkzeug.security import generate_password_hash, check_password_hash
 
 from datetime import datetime, timedelta, timezone
 
 DATABASE = "recipes.db"
 JWT_SECRET = os.getenv("JWT_SECRET")
+PBKDF2_ITERATIONS = 200_000 # how many iterations to use for PBKDF2
 
 app = Flask(__name__)
 
 # Password hashing and verification functions
-def hash_password(plain_password: str) -> str:
-    """Take a plain-text password and return a hashed version of it."""
-    return generate_password_hash(plain_password)
+def hash_password(password: str) -> str:
+    # random 16-byte salt
+    salt = os.urandom(16)
+    # derive a key with pbkdf2_hmac
+    dk = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt,
+        PBKDF2_ITERATIONS,
+    )
+    # store as: iterations$salt$hash (base64-encoded)
+    return "$".join([
+        str(PBKDF2_ITERATIONS),
+        base64.b64encode(salt).decode("ascii"),
+        base64.b64encode(dk).decode("ascii"),
+    ])
 
-def verify_password(stored_hash: str, candidate_password: str) -> bool:
-    """Return True if the candidate password matches the stored hash."""
-    return check_password_hash(stored_hash, candidate_password)
+def verify_password(stored_hash: str, password: str) -> bool:
+    try:
+        iterations_str, salt_b64, hash_b64 = stored_hash.split("$")
+        iterations = int(iterations_str)
+        salt = base64.b64decode(salt_b64)
+        expected_hash = base64.b64decode(hash_b64)
+    except Exception:
+        return False
+
+    dk = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt,
+        iterations,
+    )
+    return hmac.compare_digest(dk, expected_hash)
 
 
 # Database connection and teardown
@@ -164,7 +192,7 @@ def user_login():
         # Successful login - issue JWT
         payload = {
             "sub": str(user["id"]),
-            "exp": datetime.now(timezone.utc) + timedelta(seconds=20)  # Token expires in 20 seconds
+            "exp": datetime.now(timezone.utc) + timedelta(hours=1)  # Token expires in 1 hour
         }
         token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
         
@@ -213,13 +241,14 @@ def create_recipe():
     db = get_db()
     try:
         cur = db.execute(
-            "INSERT INTO recipes (title, ingredients, instructions, is_public)"
-            " VALUES (?, ?, ?, ?)",
+            "INSERT INTO recipes (title, ingredients, instructions, is_public, owner_id)"
+            " VALUES (?, ?, ?, ?, ?)",
             (
                 data["title"],
                 data["ingredients"],
                 data.get("instructions", ""),
                 1 if data.get("is_public", True) else 0,
+                request.user_id  # Use the authenticated user's ID
             ),
         )
         db.commit()
@@ -236,6 +265,7 @@ def create_recipe():
 # Update recipe
 @app.patch("/recipes/<int:recipe_id>")
 def update_recipe(recipe_id):
+    # Authentication Check
     auth_header = request.headers.get("Authorization")
     if not auth_header:
         return jsonify({"error": "Authorization token required"}), 401
@@ -256,21 +286,38 @@ def update_recipe(recipe_id):
     if user_id is None:
         return jsonify({"error": "Invalid token payload"}), 401
 
-    request.user_id = user_id
+    request.user_id = user_id  # Store user ID for authorization check
+    
+    # Authorization Check
+    db = get_db()
+    row = db.execute("SELECT owner_id FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
+    
+    if row is None:
+        return jsonify({"error": "recipe not found"}), 404
+    
+    if row["owner_id"] != int(request.user_id):
+        return jsonify({"error": "You cannot update a recipe you do not own"}), 403
+    
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"error": "a JSON body is required"}), 400
+    
     fields, values = [], []
+    
     for column in ("title", "ingredients", "instructions"):
         if column in data:
             fields.append(f"{column} = ?")
             values.append(data[column])
+    
     if "is_public" in data:
         fields.append("is_public = ?")
         values.append(1 if data["is_public"] else 0)
+    
     if not fields:
         return jsonify({"error": "nothing to update"}), 400
+    
     values.append(recipe_id)
+    
     db = get_db()
     try:
         cur = db.execute(
@@ -309,7 +356,17 @@ def delete_recipe(recipe_id):
     if user_id is None:
         return jsonify({"error": "Invalid token payload"}), 401
 
-    request.user_id = user_id
+    request.user_id = user_id  # Store user ID for authorization check
+    
+    # Authorization Check
+    db = get_db()
+    row = db.execute("SELECT owner_id FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
+    
+    if row is None:
+        return jsonify({"error": "recipe not found"}), 404
+    
+    if row["owner_id"] != int(request.user_id):
+        return jsonify({"error": "You cannot delete a recipe you do not own"}), 403
 
     db = get_db()
     cur = db.execute("DELETE FROM recipes WHERE id = ?", (recipe_id,))

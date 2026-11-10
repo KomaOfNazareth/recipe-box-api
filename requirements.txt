@@ -1,2 +1,8 @@
 flask
-werkzeug
+PyJWT
+os
+hashlib
+PyJWT
+hmac
+base64
+datetime
