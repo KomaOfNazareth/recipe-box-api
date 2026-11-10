@@ -206,6 +206,7 @@ def user_login():
 # Create recipe
 @app.post("/recipes")
 def create_recipe():
+    # Authentication Check
     auth_header = request.headers.get("Authorization")
     if not auth_header:
         return jsonify({"error": "Authorization token required"}), 401
@@ -336,6 +337,7 @@ def update_recipe(recipe_id):
 # Delete recipe
 @app.delete("/recipes/<int:recipe_id>")
 def delete_recipe(recipe_id):
+    # Authentication Check
     auth_header = request.headers.get("Authorization")
     if not auth_header:
         return jsonify({"error": "Authorization token required"}), 401
