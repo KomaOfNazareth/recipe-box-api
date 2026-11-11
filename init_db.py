@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS recipes (
     title TEXT NOT NULL UNIQUE,
     ingredients TEXT NOT NULL,
     instructions TEXT NOT NULL DEFAULT '',
-    is_public INTEGER NOT NULL DEFAULT 1
+    is_public INTEGER NOT NULL DEFAULT 1,
+    owner_id INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS users (
