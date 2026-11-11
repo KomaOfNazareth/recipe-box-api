@@ -243,34 +243,8 @@ def user_login():
 
 # Create recipe
 @app.post("/recipes")
+@require_auth
 def create_recipe():
-    # Authentication Check
-    auth_header = request.headers.get("Authorization")
-    if not auth_header:
-        return jsonify({"error": "Authorization token required"}), 401
-    
-    parts = auth_header.split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        return jsonify({"error": "Invalid authorization header format"}), 401
-    
-    token = parts[1]
-    
-    JWT_SECRET = os.getenv("JWT_SECRET")
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-        
-    except jwt.ExpiredSignatureError:
-        return jsonify({"error": "Token has expired, please log in again"}), 401
-    
-    except jwt.InvalidTokenError:
-        return jsonify({"error": "Invalid or expired token"}), 401
-    
-    user_id = payload.get("sub")
-    if user_id is None:
-        return jsonify({"error": "Invalid token payload"}), 401
-    
-    request.user_id = user_id  # Store user ID in request context for later use
-    
     data = request.get_json(silent=True)
     if data is None:
         return jsonify({"error": "Invalid JSON"}), 400
