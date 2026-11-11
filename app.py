@@ -13,8 +13,8 @@ import hmac
 import base64
 
 from flask import Flask, g, jsonify, request
-
 from datetime import datetime, timedelta, timezone
+from functools import wraps
 
 DATABASE = "recipes.db"
 JWT_SECRET = os.getenv("JWT_SECRET")
@@ -57,6 +57,43 @@ def verify_password(stored_hash: str, password: str) -> bool:
     )
     return hmac.compare_digest(dk, expected_hash)
 
+# Authentication and authorization decorators
+def require_auth(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        # Authentication Check
+        auth_header = request.headers.get("Authorization")
+        if not auth_header:
+            return jsonify({"error": "Authorization token required"}), 401
+
+        parts = auth_header.split()
+        if len(parts) != 2 or parts[0].lower() != "bearer":
+            return jsonify({"error": "Invalid authorization header format"}), 401
+
+        token = parts[1]
+
+        JWT_SECRET = os.getenv("JWT_SECRET")
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        except jwt.InvalidTokenError:
+            return jsonify({"error": "Invalid or expired token"}), 401
+
+        user_id = payload.get("sub")
+        if user_id is None:
+            return jsonify({"error": "Invalid token payload"}), 401
+
+        role = payload.get("role")
+        if role is None:
+            return jsonify({"error": "Invalid token payload"}), 401
+
+        # Attach identity for later authorization
+        request.user_id = user_id
+        request.role = role
+
+        # Hand off to the original route
+        return func(*args, **kwargs)
+
+    return wrapper
 
 # Database connection and teardown
 def get_db():
@@ -180,7 +217,7 @@ def user_login():
     cursor = db.cursor()
     try:
         cursor.execute(
-            "SELECT id, username, email, password_hash FROM users WHERE username = ?", (username,)
+            "SELECT id, username, email, password_hash, role FROM users WHERE username = ?", (username,)
         )
         user = cursor.fetchone()
         if user is None:
@@ -192,6 +229,7 @@ def user_login():
         # Successful login - issue JWT
         payload = {
             "sub": str(user["id"]),
+            "role": user["role"],
             "exp": datetime.now(timezone.utc) + timedelta(hours=1)  # Token expires in 1 hour
         }
         token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
@@ -265,38 +303,17 @@ def create_recipe():
 
 # Update recipe
 @app.patch("/recipes/<int:recipe_id>")
+@require_auth
 def update_recipe(recipe_id):
-    # Authentication Check
-    auth_header = request.headers.get("Authorization")
-    if not auth_header:
-        return jsonify({"error": "Authorization token required"}), 401
-
-    parts = auth_header.split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        return jsonify({"error": "Invalid authorization header format"}), 401
-
-    token = parts[1]
-
-    JWT_SECRET = os.getenv("JWT_SECRET")
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-    except jwt.InvalidTokenError:
-        return jsonify({"error": "Invalid or expired token"}), 401
-
-    user_id = payload.get("sub")
-    if user_id is None:
-        return jsonify({"error": "Invalid token payload"}), 401
-
-    request.user_id = user_id  # Store user ID for authorization check
-    
-    # Authorization Check
     db = get_db()
-    row = db.execute("SELECT owner_id FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
-    
+    row = db.execute(
+        "SELECT owner_id FROM recipes WHERE id = ?", (recipe_id,)
+    ).fetchone()
+
     if row is None:
         return jsonify({"error": "recipe not found"}), 404
-    
-    if row["owner_id"] != int(request.user_id):
+
+    if row["owner_id"] != int(request.user_id) and request.role != "admin":
         return jsonify({"error": "You cannot update a recipe you do not own"}), 403
     
     data = request.get_json(silent=True)
@@ -336,38 +353,15 @@ def update_recipe(recipe_id):
 
 # Delete recipe
 @app.delete("/recipes/<int:recipe_id>")
+@require_auth
 def delete_recipe(recipe_id):
-    # Authentication Check
-    auth_header = request.headers.get("Authorization")
-    if not auth_header:
-        return jsonify({"error": "Authorization token required"}), 401
-
-    parts = auth_header.split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        return jsonify({"error": "Invalid authorization header format"}), 401
-
-    token = parts[1]
-
-    JWT_SECRET = os.getenv("JWT_SECRET")
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-    except jwt.InvalidTokenError:
-        return jsonify({"error": "Invalid or expired token"}), 401
-
-    user_id = payload.get("sub")
-    if user_id is None:
-        return jsonify({"error": "Invalid token payload"}), 401
-
-    request.user_id = user_id  # Store user ID for authorization check
-    
-    # Authorization Check
     db = get_db()
     row = db.execute("SELECT owner_id FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
     
     if row is None:
         return jsonify({"error": "recipe not found"}), 404
     
-    if row["owner_id"] != int(request.user_id):
+    if row["owner_id"] != int(request.user_id) and request.role != "admin":
         return jsonify({"error": "You cannot delete a recipe you do not own"}), 403
 
     db = get_db()
