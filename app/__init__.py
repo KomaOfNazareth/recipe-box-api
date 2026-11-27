@@ -32,9 +32,6 @@ CONFIGS = {
     "production": ProductionConfig,
 }
 
-JWT_SECRET = os.getenv("JWT_SECRET")  # Read the secret from the process environment; None if unset.
-PBKDF2_ITERATIONS = 200_000
-
 def create_app(config_name="development"):
     app = Flask(__name__)
     selected_config = CONFIGS[config_name]
@@ -50,12 +47,12 @@ def create_app(config_name="development"):
             "sha256",  # Use SHA-256 as the underlying digest algorithm.
             password.encode("utf-8"),  # Hashing APIs take bytes, so encode the password from text.
             salt,  # Mix the random salt into the derived key.
-            PBKDF2_ITERATIONS,  # Repeat the work this many times to make guessing slower.
+            current_app.config["PBKDF2_ITERATIONS"],  # Repeat the work this many times to make guessing slower.
         )
 
         # store as: iterations$salt$hash (base64-encoded)
         return "$".join([
-            str(PBKDF2_ITERATIONS),  # Convert the integer to text for storage.
+            str(current_app.config["PBKDF2_ITERATIONS"]),  # Convert the integer to text for storage.
             base64.b64encode(salt).decode("ascii"),  # Encode bytes as ASCII-safe text.
             base64.b64encode(dk).decode("ascii"),  # Store the derived key beside its salt/settings.
         ])
@@ -95,7 +92,7 @@ def create_app(config_name="development"):
 
             token = parts[1]
 
-            JWT_SECRET = os.getenv("JWT_SECRET")  # Re-read the secret when handling each request.
+            JWT_SECRET = current_app.config["JWT_SECRET"]  # Use the app's config for the JWT secret.
             try:
                 payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])  # Verify signature and expiry.
             except jwt.InvalidTokenError:  # PyJWT raises this for invalid, expired, or unverifiable tokens.
@@ -125,7 +122,7 @@ def create_app(config_name="development"):
             db_path = current_app.config["DATABASE"]  # Use the config's database path for this app.
             print("CONNECTING TO DB AT:", db_path)  # Log the database path for debugging.
             g.db = sqlite3.connect(db_path)
-            g.db.row_facstory = sqlite3.Row  # Return rows as dictionary-like objects for easier access.
+            g.db.row_factory = sqlite3.Row  # Return rows as dictionary-like objects for easier access.
         return g.db  # Return the request's SQLite connection.
 
 
@@ -262,7 +259,7 @@ def create_app(config_name="development"):
                 "role": user["role"],
                 "exp": datetime.now(timezone.utc) + timedelta(hours=1)  # UTC now plus one hour is the expiry time.
             }
-            token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")  # Sign claims with the shared secret.
+            token = jwt.encode(payload, current_app.config["JWT_SECRET"], algorithm="HS256")  # Sign claims with the shared secret.
 
             return jsonify({"token": token}), 200
 
