@@ -6,3 +6,4 @@ PyJWT
 hmac
 base64
 datetime
+python-dotenv

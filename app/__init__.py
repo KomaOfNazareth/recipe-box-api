@@ -15,19 +15,30 @@ import hmac  # Provides a timing-safe comparison for password hashes.
 import base64  # Converts bytes to text so they can be stored in the database.
 
 # Flask names used to build the app, access request-scoped data, and send JSON.
-from flask import Flask, g, jsonify, request
+from flask import Flask, g, jsonify, request, current_app
 # datetime/timezone build expiration timestamps; timedelta represents a duration.
 from datetime import datetime, timedelta, timezone
 # wraps preserves the original function's metadata when a decorator wraps it.
 from functools import wraps
+from app.config import (
+    DevelopmentConfig,
+    TestingConfig,
+    ProductionConfig,
+)
 
-# ALL_CAPS is the common naming style for module-level constants.
-DATABASE = "recipes.db"  # SQLite will open this database file in the app's working directory.
+CONFIGS = {
+    "development": DevelopmentConfig,
+    "testing": TestingConfig,
+    "production": ProductionConfig,
+}
+
 JWT_SECRET = os.getenv("JWT_SECRET")  # Read the secret from the process environment; None if unset.
-PBKDF2_ITERATIONS = 200_000 # how many iterations to use for PBKDF2
+PBKDF2_ITERATIONS = 200_000
 
-def create_app(config_name):
+def create_app(config_name="development"):
     app = Flask(__name__)
+    selected_config = CONFIGS[config_name]
+    app.config.from_object(selected_config)
 
     # Password hashing and verification functions
     def hash_password(password: str) -> str:  # Type hints document that this takes and returns text.
@@ -110,11 +121,12 @@ def create_app(config_name):
 
     # Database connection and teardown
     def get_db():
-        if "db" not in g:  # Reuse one connection during a request; create it the first time only.
-            g.db = sqlite3.connect(DATABASE)  # Open the SQLite file and save the connection on g.
-            g.db.row_factory = sqlite3.Row  # Let query results be accessed by column name.
-            g.db.execute("PRAGMA foreign_keys = ON")  # Ask SQLite to enforce declared foreign keys.
-        return g.db  # Return the cached connection to the caller.
+        if "db" not in g:
+            db_path = current_app.config["DATABASE"]  # Use the config's database path for this app.
+            print("CONNECTING TO DB AT:", db_path)  # Log the database path for debugging.
+            g.db = sqlite3.connect(db_path)
+            g.db.row_facstory = sqlite3.Row  # Return rows as dictionary-like objects for easier access.
+        return g.db  # Return the request's SQLite connection.
 
 
     @app.teardown_appcontext  # Flask calls this after an app/request context is finished.
@@ -355,9 +367,5 @@ def create_app(config_name):
         db = get_db()
         cur = db.execute("DELETE FROM recipes WHERE id = ?", (recipe_id,))  # Bind the ID as a one-item tuple.
         db.commit()
-
-
-    if __name__ == "__main__":  # This condition is true only when this file is run directly.
-        app.run(debug=True)  # Start Flask's development server; importing this module won't start it.
 
     return app
